@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dotty Matrix — isometric layer breakdown</title>
+<style>
+  :root{
+    --bg:#EEECE3;
+    --ink:#322F22;
+    --ink-soft:#8a8677;
+    --line:#d8d5c8;
+    --panel:#f6f4ea;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    display:flex;
+    height:100vh;
+    overflow:hidden;
+  }
+
+  /* ---------- panel ---------- */
+  aside{
+    width:308px;
+    flex:0 0 308px;
+    background:var(--panel);
+    border-right:1px solid var(--line);
+    padding:18px 24px 40px 16px;
+    overflow-y:auto;
+    overflow-x:hidden;
+  }
+  aside h1{
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    margin:0 0 2px;
+  }
+  aside .sub{color:var(--ink-soft);margin:0 0 20px}
+
+  fieldset{
+    border:none;
+    border-top:1px solid var(--line);
+    margin:0 0 14px;
+    padding:12px 0 0;
+    min-inline-size:0;   /* fieldset refuses to shrink below min-content without this */
+  }
+  fieldset.first{border-top:none;padding-top:0}
+  legend{
+    font-size:10px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+    padding:0;
+  }
+
+  .ctl{display:flex;align-items:center;gap:8px;margin:7px 0;min-width:0}
+  .ctl label{flex:0 1 96px;min-width:0;color:var(--ink-soft);
+             overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ctl input[type=range]{flex:1 1 0;min-width:0;accent-color:var(--ink);height:16px}
+  .ctl .val{flex:0 0 30px;text-align:right;font-variant-numeric:tabular-nums}
+  .ctl input[type=text]{
+    flex:1;min-width:0;background:#fff;border:1px solid var(--line);
+    padding:5px 7px;font:inherit;color:var(--ink);border-radius:3px;
+  }
+
+  .toggles{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .toggles button,.presets button,.actions button{
+    background:#fff;border:1px solid var(--line);color:var(--ink);
+    padding:6px 9px;font:inherit;border-radius:3px;cursor:pointer;
+  }
+  .toggles button[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:#fff}
+  .presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:8px}
+  .actions{display:flex;gap:6px;margin-top:12px}
+  .actions button{flex:1;padding:9px}
+  .actions button.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+  button:hover{opacity:.82}
+
+  /* ---------- field editor ---------- */
+  #editor{
+    display:grid;gap:2px;margin-top:10px;
+    user-select:none;touch-action:none;
+  }
+  #editor .cell{
+    aspect-ratio:1;border:1px solid var(--line);border-radius:50%;
+    background:#fff;cursor:crosshair;
+  }
+  .brushRow{display:flex;gap:4px;margin-top:8px}
+  .brushRow button{
+    flex:1 1 0;min-width:0;height:26px;border:1px solid var(--line);border-radius:3px;cursor:pointer;
+  }
+  .brushRow button[aria-pressed=true]{outline:2px solid var(--ink);outline-offset:1px}
+
+  /* ---------- stage ---------- */
+  main{flex:1;min-width:0;position:relative;display:flex;align-items:center;justify-content:center;padding:32px}
+  #stage{width:100%;height:100%;cursor:grab}
+  #stage.drag{cursor:grabbing}
+  #stage svg{width:100%;height:100%;display:block}
+  .hint{
+    position:absolute;left:24px;bottom:18px;color:var(--ink-soft);letter-spacing:.06em;
+  }
+</style>
+</head>
+<body>
+
+<aside>
+  <fieldset class="first">
+    <legend>Field</legend>
+    <div class="ctl">
+      <label>grid size</label>
+      <input type="range" id="grid" min="3" max="13" step="1" value="7">
+      <span class="val" id="gridV">7</span>
+    </div>
+    <div id="editor"></div>
+    <div class="brushRow" id="brushRow"></div>
+    <div class="presets">
+      <button data-preset="radial">radial</button>
+      <button data-preset="gauss">gauss</button>
+      <button data-preset="ring">ring</button>
+      <button data-preset="letterT">Т</button>
+      <button data-preset="noise">noise</button>
+      <button data-preset="clear">×</button>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Space</legend>
+    <div class="ctl">
+      <label>yaw</label>
+      <input type="range" id="yaw" min="-80" max="80" step="1" value="38">
+      <span class="val" id="yawV">38</span>
+    </div>
+    <div class="ctl">
+      <label>pitch</label>
+      <input type="range" id="pitch" min="-60" max="60" step="1" value="14">
+      <span class="val" id="pitchV">14</span>
+    </div>
+    <div class="ctl">
+      <label>layer gap</label>
+      <input type="range" id="gap" min="20" max="220" step="1" value="96">
+      <span class="val" id="gapV">96</span>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Layers</legend>
+    <div class="toggles" id="countRow">
+      <button data-count="4" aria-pressed="false">4</button>
+      <button data-count="5" aria-pressed="true">5</button>
+    </div>
+    <div class="toggles" id="modeRow" style="margin-top:8px">
+      <button data-mode="stack" aria-pressed="true">stack</button>
+      <button data-mode="band" aria-pressed="false">slice</button>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Dots</legend>
+    <div class="ctl">
+      <label>spacing</label>
+      <input type="range" id="cell" min="18" max="64" step="1" value="38">
+      <span class="val" id="cellV">38</span>
+    </div>
+    <div class="ctl">
+      <label>near ⌀</label>
+      <input type="range" id="rNear" min="4" max="80" step="1" value="14">
+      <span class="val" id="rNearV">14</span>
+    </div>
+    <div class="ctl">
+      <label>far ⌀</label>
+      <input type="range" id="rFar" min="4" max="80" step="1" value="52">
+      <span class="val" id="rFarV">52</span>
+    </div>
+    <div class="ctl">
+      <label>near tone</label>
+      <input type="range" id="tNear" min="0" max="100" step="1" value="8">
+      <span class="val" id="tNearV">8</span>
+    </div>
+    <div class="ctl">
+      <label>far tone</label>
+      <input type="range" id="tFar" min="0" max="100" step="1" value="58">
+      <span class="val" id="tFarV">58</span>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Style</legend>
+    <div class="toggles" id="flagRow">
+      <button data-flag="base" aria-pressed="true">base grid</button>
+      <button data-flag="baseAll" aria-pressed="false">grid × layers</button>
+      <button data-flag="frame" aria-pressed="true">frames</button>
+      <button data-flag="axis" aria-pressed="true">axis</button>
+      <button data-flag="ring" aria-pressed="false">outline</button>
+      <button data-flag="solid" aria-pressed="false">solid</button>
+    </div>
+  </fieldset>
+
+  <div class="actions">
+    <button id="dlPng" class="primary">PNG</button>
+  </div>
+</aside>
+
+<main>
+  <div id="stage"></div>
+</main>
+
+<script>
+(function(){
+  "use strict";
+
+  var S = {
+    grid: 7, layers: 5, mode: "stack",
+    yaw: 38, pitch: 14, gap: 96,
+    cell: 38, rNear: 14, rFar: 52,
+    tNear: 8, tFar: 58,
+    base: true, baseAll: false, frame: true, axis: true, ring: false, solid: false
+  };
+
+  var field = [];
+  var brush = 1;
+  var RAD = Math.PI/180;
+
+  /* ============ field ============ */
+
+  function resizeField(n){
+    var old = field, oldN = Math.sqrt(old.length) | 0;
+    field = new Array(n*n).fill(0);
+    if (oldN){
+      for (var y=0; y<n; y++)
+        for (var x=0; x<n; x++){
+          var sx = Math.round(x/(n-1||1)*(oldN-1));
+          var sy = Math.round(y/(n-1||1)*(oldN-1));
+          field[y*n+x] = old[sy*oldN+sx] || 0;
+        }
+    }
+  }
+
+  function quant(v){
+    var L = S.layers;
+    return Math.max(0, Math.min(1, Math.round(v*L)/L));
+  }
+
+  function preset(kind){
+    var n = S.grid, c = (n-1)/2;
+    for (var y=0; y<n; y++)
+      for (var x=0; x<n; x++){
+        var dx = (x-c)/(c||1), dy = (y-c)/(c||1);
+        var d = Math.sqrt(dx*dx + dy*dy);
+        var v = 0;
+        if (kind === "radial") v = Math.max(0, 1 - d);
+        else if (kind === "gauss") v = Math.exp(-d*d*2.2);
+        else if (kind === "ring") v = Math.max(0, 1 - Math.abs(d-0.62)*3.2);
+        else if (kind === "letterT"){
+          var top = Math.max(1, Math.round(n/4));      // top bar thickness
+          var half2 = Math.max(0, Math.round(n/10));   // stem half-width
+          v = (y < top || Math.abs(x - c) <= half2) ? 1 : 0;
+        }
+        else if (kind === "noise") v = Math.random();
+        field[y*n+x] = quant(v);
+      }
+  }
+
+  /* ============ editor ============ */
+
+  var editorEl = document.getElementById("editor");
+  var painting = false;
+
+  function buildEditor(){
+    var n = S.grid;
+    editorEl.style.gridTemplateColumns = "repeat(" + n + ",minmax(0,1fr))";
+    editorEl.innerHTML = "";
+    for (var i=0; i<n*n; i++){
+      var d = document.createElement("div");
+      d.className = "cell";
+      d.dataset.i = i;
+      editorEl.appendChild(d);
+    }
+    paintEditor();
+  }
+
+  function swatch(v){
+    // v = 0 → empty, v → 1 = darkest; ride the light→dark palette ramp
+    if (v <= 0) return "#fff";
+    var t = 1 - v;   // higher value = darker
+    var r = Math.round(lerp(C_DARK[0], C_LIGHT[0], t));
+    var g = Math.round(lerp(C_DARK[1], C_LIGHT[1], t));
+    var b = Math.round(lerp(C_DARK[2], C_LIGHT[2], t));
+    return "rgb("+r+","+g+","+b+")";
+  }
+
+  function paintEditor(){
+    var kids = editorEl.children;
+    for (var i=0; i<kids.length; i++){
+      kids[i].style.background = swatch(field[i] || 0);
+    }
+  }
+
+  function applyBrush(target){
+    if (!target || !target.dataset || target.dataset.i === undefined) return;
+    var i = +target.dataset.i;
+    if (field[i] === brush) return;
+    field[i] = brush;
+    paintEditor();
+    render();
+  }
+
+  editorEl.addEventListener("pointerdown", function(e){
+    painting = true;
+    editorEl.setPointerCapture(e.pointerId);
+    applyBrush(e.target);
+  });
+  editorEl.addEventListener("pointermove", function(e){
+    if (!painting) return;
+    applyBrush(document.elementFromPoint(e.clientX, e.clientY));
+  });
+  window.addEventListener("pointerup", function(){ painting = false; });
+
+  function buildBrushes(){
+    var row = document.getElementById("brushRow");
+    row.innerHTML = "";
+    for (var k=0; k<=S.layers; k++){
+      (function(v){
+        var b = document.createElement("button");
+        b.style.background = swatch(v);
+        b.setAttribute("aria-pressed", String(Math.abs(brush - v) < 1e-6));
+        b.title = v.toFixed(2);
+        b.onclick = function(){ brush = v; buildBrushes(); };
+        row.appendChild(b);
+      })(k / S.layers);
+    }
+  }
+
+  /* ============ 3D ============ */
+
+  // Rotation: yaw about Y, pitch about X.
+  // Orthographic projection — we take x,y after rotating.
+  function rot(p){
+    var cy = Math.cos(S.yaw*RAD),  sy = Math.sin(S.yaw*RAD);
+    var cp = Math.cos(S.pitch*RAD), sp = Math.sin(S.pitch*RAD);
+    var x = p[0], y = p[1], z = p[2];
+
+    var x1 =  x*cy + z*sy;
+    var z1 = -x*sy + z*cy;
+
+    var y2 =  y*cp - z1*sp;
+    var z2 =  y*sp + z1*cp;
+
+    return [x1, y2, z2];
+  }
+
+  // Projected basis vectors of a layer plane plus its origin.
+  // Every layer is an XY plane in 3D, offset along Z.
+  function basis(depth){
+    var o = rot([0, 0, depth*S.gap]);
+    var u = rot([S.cell, 0, depth*S.gap]);   // column direction
+    var v = rot([0, S.cell, depth*S.gap]);   // row direction
+    return {
+      o: [o[0], o[1]],
+      u: [u[0]-o[0], u[1]-o[1]],
+      v: [v[0]-o[0], v[1]-o[1]],
+      z: o[2]
+    };
+  }
+
+  function activeAt(v, depth){
+    if (v <= 0) return false;
+    var L = S.layers;
+    if (S.mode === "band"){
+      var band = Math.min(L-1, Math.floor(v*L - 1e-9));
+      return depth === (L-1-band);
+    }
+    return v >= (L-1-depth)/L - 1e-9;
+  }
+
+  /* ============ render ============ */
+
+  var stage = document.getElementById("stage");
+
+  // palette: tone 0 → darkest, tone 100 → lightest
+  var C_DARK  = [0x32, 0x2f, 0x22];   // #322F22
+  var C_LIGHT = [0xf9, 0xf9, 0xf9];   // #F9F9F9
+  var C_BG    = "#EEECE3";
+  var C_LINE  = "#CAC9C2";
+
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function gray(p){
+    var t = Math.max(0, Math.min(1, p/100));
+    var r = Math.round(lerp(C_DARK[0], C_LIGHT[0], t));
+    var g = Math.round(lerp(C_DARK[1], C_LIGHT[1], t));
+    var b = Math.round(lerp(C_DARK[2], C_LIGHT[2], t));
+    return "rgb("+r+","+g+","+b+")";
+  }
+  function f(x){ return (Math.round(x*10)/10).toString(); }
+
+  function render(){
+    var n = S.grid, L = S.layers, half = (n-1)/2;
+    var minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+
+    function grow(x, y){
+      if (x<minX) minX=x;
+      if (x>maxX) maxX=x;
+      if (y<minY) minY=y;
+      if (y>maxY) maxY=y;
+    }
+
+    // local coordinates measured in cell units
+    var baseR = 0.44;
+    var frameEdge = half + 0.98;
+
+    // sort layers by depth — far ones are drawn first
+    var order = [];
+    for (var i=0; i<L; i++) order.push({ d:i, b:basis(i) });
+    order.sort(function(a,b){ return b.b.z - a.b.z; });
+
+    var parts = [];
+
+    order.forEach(function(item){
+      var d = item.d, B = item.b;
+      var t = L > 1 ? d/(L-1) : 0;              // 0 = near, 1 = far
+      var rl = lerp(S.rNear, S.rFar, t) / 2 / S.cell;
+      var fill = gray(lerp(S.tNear, S.tFar, t));
+
+      // bounds helper: local point (a,b) → screen
+      function P(a, bb){ return [ B.o[0] + a*B.u[0] + bb*B.v[0],
+                                  B.o[1] + a*B.u[1] + bb*B.v[1] ]; }
+
+      var m = "matrix("+[B.u[0],B.u[1],B.v[0],B.v[1],B.o[0],B.o[1]].map(f).join(",")+")";
+      var g = ['<g transform="'+m+'">'];
+
+      if (S.frame || S.solid){
+        var cs = [[-frameEdge,-frameEdge],[frameEdge,-frameEdge],[frameEdge,frameEdge],[-frameEdge,frameEdge]];
+        cs.forEach(function(c){ var p = P(c[0], c[1]); grow(p[0], p[1]); });
+        var rr = 0.4;   // corner radius, in cell units
+        var rectAttr = 'x="'+f(-frameEdge)+'" y="'+f(-frameEdge)+'" width="'+f(frameEdge*2)+
+                       '" height="'+f(frameEdge*2)+'" rx="'+rr+'" ry="'+rr+'"';
+        if (S.solid)
+          g.push('<rect '+rectAttr+' fill="'+C_BG+'" stroke="none"/>');
+        if (S.frame)
+          g.push('<rect '+rectAttr+' fill="none" stroke="'+C_LINE+'" stroke-width="0.8"'+
+                 ' vector-effect="non-scaling-stroke"/>');
+      }
+
+      if (S.base && (S.baseAll || d === 0)){
+        for (var gy=0; gy<n; gy++)
+          for (var gx=0; gx<n; gx++){
+            var a = gx-half, bb = gy-half;
+            var p = P(a, bb);
+            var bx = baseR*Math.hypot(B.u[0], B.v[0]);
+            var by = baseR*Math.hypot(B.u[1], B.v[1]);
+            grow(p[0]-bx, p[1]-by); grow(p[0]+bx, p[1]+by);
+            g.push('<circle cx="'+f(a)+'" cy="'+f(bb)+'" r="'+baseR+'" fill="none"'+
+                   ' stroke="'+C_LINE+'" stroke-width="0.7"'+
+                   ' vector-effect="non-scaling-stroke"/>');
+          }
+      }
+
+      for (var y=0; y<n; y++)
+        for (var x=0; x<n; x++){
+          var v = field[y*n+x] || 0;
+          if (!activeAt(v, d)) continue;
+          var la = x-half, lb = y-half;
+          var pp = P(la, lb);
+          var ex = rl*Math.hypot(B.u[0], B.v[0]);
+          var ey = rl*Math.hypot(B.u[1], B.v[1]);
+          grow(pp[0]-ex, pp[1]-ey); grow(pp[0]+ex, pp[1]+ey);
+          g.push('<circle cx="'+f(la)+'" cy="'+f(lb)+'" r="'+(Math.round(rl*1000)/1000)+
+                 '" fill="'+fill+'"'+
+                 (S.ring ? ' stroke="'+C_LINE+'" stroke-width="1" vector-effect="non-scaling-stroke"' : '')+'/>');
+        }
+
+      g.push("</g>");
+      parts.push(g.join(""));
+    });
+
+    // depth axis — along Z, just below the bottom-left corner of the planes
+    if (S.axis){
+      var pts = [];
+      for (var k=0; k<L; k++){
+        var Bk = basis(k);
+        var q = [ Bk.o[0] - frameEdge*Bk.u[0] + frameEdge*Bk.v[0],
+                  Bk.o[1] - frameEdge*Bk.u[1] + frameEdge*Bk.v[1] ];
+        q[1] += 22;
+        pts.push(q);
+        grow(q[0], q[1]);
+      }
+      var ax = ['<g>'];
+      ax.push('<line x1="'+f(pts[0][0])+'" y1="'+f(pts[0][1])+'" x2="'+f(pts[L-1][0])+
+              '" y2="'+f(pts[L-1][1])+'" stroke="'+C_LINE+'" stroke-width="0.8"/>');
+      for (var k2=0; k2<L; k2++){
+        ax.push('<circle cx="'+f(pts[k2][0])+'" cy="'+f(pts[k2][1])+'" r="1.8" fill="'+C_LINE+'"/>');
+      }
+      ax.push('</g>');
+      parts.push(ax.join(""));
+    }
+
+    var pad = 54;
+    var vx = minX - pad, vy = minY - pad;
+    var vw = (maxX-minX) + pad*2, vh = (maxY-minY) + pad*2;
+
+    stage.innerHTML =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="'+[vx,vy,vw,vh].map(f).join(" ")+
+      '" preserveAspectRatio="xMidYMid meet">'+
+      '<rect x="'+f(vx)+'" y="'+f(vy)+'" width="'+f(vw)+'" height="'+f(vh)+'" fill="'+C_BG+'"/>'+
+      parts.join("") + '</svg>';
+  }
+
+  /* ============ controls ============ */
+
+  var sliders = ["grid","yaw","pitch","gap","cell","rNear","rFar","tNear","tFar"];
+  sliders.forEach(function(id){
+    var el = document.getElementById(id);
+    var out = document.getElementById(id+"V");
+    el.addEventListener("input", function(){
+      S[id] = +el.value;
+      out.textContent = el.value;
+      if (id === "grid"){ resizeField(S.grid); buildEditor(); }
+      render();
+    });
+  });
+
+  function syncSliders(){
+    sliders.forEach(function(id){
+      var el = document.getElementById(id);
+      el.value = S[id];
+      document.getElementById(id+"V").textContent = S[id];
+    });
+  }
+
+  document.getElementById("countRow").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if (!b) return;
+    S.layers = +b.dataset.count;
+    [].forEach.call(this.children, function(c){
+      c.setAttribute("aria-pressed", String(c === b));
+    });
+    for (var i=0; i<field.length; i++) field[i] = quant(field[i]);  // re-snap to new steps
+    if (brush > 0) brush = quant(brush) || 1/S.layers;
+    paintEditor();
+    buildBrushes();
+    render();
+  });
+
+  document.getElementById("modeRow").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if (!b) return;
+    S.mode = b.dataset.mode;
+    [].forEach.call(this.children, function(c){
+      c.setAttribute("aria-pressed", String(c === b));
+    });
+    render();
+  });
+
+  document.getElementById("flagRow").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if (!b) return;
+    S[b.dataset.flag] = !S[b.dataset.flag];
+    b.setAttribute("aria-pressed", String(S[b.dataset.flag]));
+    render();
+  });
+
+  document.querySelector(".presets").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if (!b) return;
+    preset(b.dataset.preset);
+    paintEditor();
+    render();
+  });
+
+  /* ---- drag the stage to orbit ---- */
+  var dragging = false, px = 0, py = 0;
+  stage.addEventListener("pointerdown", function(e){
+    dragging = true; px = e.clientX; py = e.clientY;
+    stage.classList.add("drag");
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener("pointermove", function(e){
+    if (!dragging) return;
+    S.yaw   = Math.max(-80, Math.min(80, S.yaw   + (e.clientX-px)*0.35));
+    S.pitch = Math.max(-60, Math.min(60, S.pitch - (e.clientY-py)*0.35));
+    px = e.clientX; py = e.clientY;
+    S.yaw = Math.round(S.yaw); S.pitch = Math.round(S.pitch);
+    syncSliders();
+    render();
+  });
+  stage.addEventListener("pointerup", function(){ dragging = false; stage.classList.remove("drag"); });
+
+  /* ============ export ============ */
+
+  function download(blob, name){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = name; a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  }
+  document.getElementById("dlPng").onclick = function(){
+    var vb = stage.querySelector("svg").getAttribute("viewBox").split(" ").map(Number);
+    var scale = 2000 / vb[2];
+    var img = new Image();
+    img.onload = function(){
+      var c = document.createElement("canvas");
+      c.width = Math.round(vb[2]*scale);
+      c.height = Math.round(vb[3]*scale);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(function(b){ download(b, "dotty-matrix.png"); });
+    };
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(stage.innerHTML);
+  };
+
+  /* ============ start ============ */
+
+  syncSliders();          // the browser may restore stale input values — override with defaults
+  resizeField(S.grid);
+  preset("gauss");
+  buildEditor();
+  buildBrushes();
+  render();
+})();
+</script>
+</body>
+</html>
