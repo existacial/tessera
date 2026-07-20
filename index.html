@@ -163,7 +163,7 @@
     <legend>Dots</legend>
     <div class="ctl">
       <label>spacing</label>
-      <input type="range" id="cell" min="18" max="64" step="1" value="38">
+      <input type="range" id="cell" min="34" max="72" step="1" value="42">
       <span class="val" id="cellV">38</span>
     </div>
     <div class="ctl">
@@ -216,7 +216,7 @@
   var S = {
     grid: 7, layers: 5, mode: "stack",
     yaw: 38, pitch: 14, gap: 96,
-    cell: 38, rNear: 14, rFar: 52,
+    cell: 42, rNear: 14, rFar: 52,
     tNear: 8, tFar: 58,
     base: true, baseAll: false, frame: true, axis: true, ring: false, solid: false
   };
@@ -353,12 +353,17 @@
     return [x1, y2, z2];
   }
 
-  // Projected basis vectors of a layer plane plus its origin.
-  // Every layer is an XY plane in 3D, offset along Z.
-  function basis(depth){
-    var o = rot([0, 0, depth*S.gap]);
-    var u = rot([S.cell, 0, depth*S.gap]);   // column direction
-    var v = rot([0, S.cell, depth*S.gap]);   // row direction
+  // Projected basis vectors of a layer plane plus its origin, for a given
+  // in-plane unit `cell`. Every layer is an XY plane in 3D, offset along Z.
+  // The VIEW is framed at a fixed reference spacing U, so the zoom never
+  // changes with spacing: circles keep a constant on-screen size and spacing
+  // only opens the gaps (the container grows past the frame, like flex).
+  var U = 42;
+  function basisAt(depth, cell){
+    var zc = depth * S.gap;
+    var o = rot([0, 0, zc]);
+    var u = rot([cell, 0, zc]);   // column direction
+    var v = rot([0, cell, zc]);   // row direction
     return {
       o: [o[0], o[1]],
       u: [u[0]-o[0], u[1]-o[1]],
@@ -408,67 +413,59 @@
       if (y>maxY) maxY=y;
     }
 
-    // local coordinates measured in cell units
-    var baseR = 0.44;
-    var frameEdge = half + 0.98;
+    var RING_PX = 16.7;                          // outline ring radius, fixed px
+    var ringLocal = RING_PX / S.cell;            // in cell units → constant pixel size
+    // frame hugs the node lattice, leaving room for the fixed-size rings so it
+    // always contains every cell whatever the spacing is
+    var frameEdge = half + ringLocal + 0.35;
 
     // sort layers by depth — far ones are drawn first
     var order = [];
-    for (var i=0; i<L; i++) order.push({ d:i, b:basis(i) });
+    for (var i=0; i<L; i++) order.push({ d:i, b:basisAt(i, S.cell) });
     order.sort(function(a,b){ return b.b.z - a.b.z; });
 
     var parts = [];
 
     order.forEach(function(item){
-      var d = item.d, B = item.b;
-      var t = L > 1 ? d/(L-1) : 0;              // 0 = near, 1 = far
-      var rl = lerp(S.rNear, S.rFar, t) / 2 / S.cell;
+      var d = item.d, B = item.b;                // one lattice basis at actual spacing
+      var t = L > 1 ? d/(L-1) : 0;               // 0 = near, 1 = far
+      var rl = lerp(S.rNear, S.rFar, t) / 2 / S.cell;   // → fixed pixel size on screen
       var fill = gray(lerp(S.tNear, S.tFar, t));
 
-      // bounds helper: local point (a,b) → screen
       function P(a, bb){ return [ B.o[0] + a*B.u[0] + bb*B.v[0],
                                   B.o[1] + a*B.u[1] + bb*B.v[1] ]; }
 
       var m = "matrix("+[B.u[0],B.u[1],B.v[0],B.v[1],B.o[0],B.o[1]].map(f).join(",")+")";
       var g = ['<g transform="'+m+'">'];
 
+      // --- plane frame: grows with spacing to wrap all cells ---
       if (S.frame || S.solid){
         var cs = [[-frameEdge,-frameEdge],[frameEdge,-frameEdge],[frameEdge,frameEdge],[-frameEdge,frameEdge]];
         cs.forEach(function(c){ var p = P(c[0], c[1]); grow(p[0], p[1]); });
-        var rr = 0.4;   // corner radius, in cell units
+        var rr = 0.4;
         var rectAttr = 'x="'+f(-frameEdge)+'" y="'+f(-frameEdge)+'" width="'+f(frameEdge*2)+
                        '" height="'+f(frameEdge*2)+'" rx="'+rr+'" ry="'+rr+'"';
-        if (S.solid)
-          g.push('<rect '+rectAttr+' fill="'+C_BG+'" stroke="none"/>');
-        if (S.frame)
-          g.push('<rect '+rectAttr+' fill="none" stroke="'+C_LINE+'" stroke-width="0.8"'+
-                 ' vector-effect="non-scaling-stroke"/>');
+        if (S.solid) g.push('<rect '+rectAttr+' fill="'+C_BG+'" stroke="none"/>');
+        if (S.frame) g.push('<rect '+rectAttr+' fill="none" stroke="'+C_LINE+'" stroke-width="0.8"'+
+                            ' vector-effect="non-scaling-stroke"/>');
       }
 
+      // --- outline rings: fixed size, spacing sets the gap between them ---
       if (S.base && (S.baseAll || d === 0)){
         for (var gy=0; gy<n; gy++)
           for (var gx=0; gx<n; gx++){
-            var a = gx-half, bb = gy-half;
-            var p = P(a, bb);
-            var bx = baseR*Math.hypot(B.u[0], B.v[0]);
-            var by = baseR*Math.hypot(B.u[1], B.v[1]);
-            grow(p[0]-bx, p[1]-by); grow(p[0]+bx, p[1]+by);
-            g.push('<circle cx="'+f(a)+'" cy="'+f(bb)+'" r="'+baseR+'" fill="none"'+
-                   ' stroke="'+C_LINE+'" stroke-width="0.7"'+
+            g.push('<circle cx="'+f(gx-half)+'" cy="'+f(gy-half)+'" r="'+(Math.round(ringLocal*1000)/1000)+
+                   '" fill="none" stroke="'+C_LINE+'" stroke-width="0.7"'+
                    ' vector-effect="non-scaling-stroke"/>');
           }
       }
 
+      // --- filled dots ---
       for (var y=0; y<n; y++)
         for (var x=0; x<n; x++){
           var v = field[y*n+x] || 0;
           if (!activeAt(v, d)) continue;
-          var la = x-half, lb = y-half;
-          var pp = P(la, lb);
-          var ex = rl*Math.hypot(B.u[0], B.v[0]);
-          var ey = rl*Math.hypot(B.u[1], B.v[1]);
-          grow(pp[0]-ex, pp[1]-ey); grow(pp[0]+ex, pp[1]+ey);
-          g.push('<circle cx="'+f(la)+'" cy="'+f(lb)+'" r="'+(Math.round(rl*1000)/1000)+
+          g.push('<circle cx="'+f(x-half)+'" cy="'+f(y-half)+'" r="'+(Math.round(rl*1000)/1000)+
                  '" fill="'+fill+'"'+
                  (S.ring ? ' stroke="'+C_LINE+'" stroke-width="1" vector-effect="non-scaling-stroke"' : '')+'/>');
         }
@@ -481,7 +478,7 @@
     if (S.axis){
       var pts = [];
       for (var k=0; k<L; k++){
-        var Bk = basis(k);
+        var Bk = basisAt(k, S.cell);
         var q = [ Bk.o[0] - frameEdge*Bk.u[0] + frameEdge*Bk.v[0],
                   Bk.o[1] - frameEdge*Bk.u[1] + frameEdge*Bk.v[1] ];
         q[1] += 22;
@@ -496,6 +493,23 @@
       }
       ax.push('</g>');
       parts.push(ax.join(""));
+    }
+
+    // View bounds at the reference spacing U → fixed zoom. Circles stay a
+    // constant on-screen size; the container grows past this frame with spacing.
+    minX=Infinity; minY=Infinity; maxX=-Infinity; maxY=-Infinity;
+    var feU = half + (RING_PX/U) + 0.35;
+    for (var fi=0; fi<L; fi++){
+      var Bu = basisAt(fi, U);
+      [[-feU,-feU],[feU,-feU],[feU,feU],[-feU,feU]].forEach(function(c){
+        grow(Bu.o[0] + c[0]*Bu.u[0] + c[1]*Bu.v[0],
+             Bu.o[1] + c[0]*Bu.u[1] + c[1]*Bu.v[1]);
+      });
+    }
+    if (S.axis){
+      var Bax = basisAt(L-1, U);
+      grow(Bax.o[0] - feU*Bax.u[0] + feU*Bax.v[0],
+           Bax.o[1] - feU*Bax.u[1] + feU*Bax.v[1] + 40);
     }
 
     var pad = 54;
